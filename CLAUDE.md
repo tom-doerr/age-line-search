@@ -1,6 +1,6 @@
 # age-line-search
 
-Private repo github.com/tom-doerr/age-line-search. Streamlit age estimation via
+Repo github.com/tom-doerr/age-line-search, PUBLIC since Sep 19 2026 — keep machine detail (hosts, IPs, paths) out of it. Streamlit age estimation via
 line search over age prompts with CLIP or TIPSv2.
 
 - `age_search.py` = all logic (formats, number words, `line_search`, `ClipScorer`,
