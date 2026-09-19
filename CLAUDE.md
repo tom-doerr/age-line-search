@@ -28,3 +28,10 @@ line search over age prompts with CLIP or TIPSv2.
   prompts can read "34.5" / "thirty-four point five" (`format_age`, `%g` drops ".0").
   Both scan and golden-section search the grid INDICES, so golden works at any step.
   Full scan refuses > 2000 prompts (UI error); text encoding is chunked by 256.
+- **Run it as a systemd unit, not as a Claude background task** (the harness killed the
+  task under memory pressure, Sep 19 2026): `systemd-run --user --unit=age-line-search
+  --collect -p MemoryMax=12G -p WorkingDirectory=$PWD --setenv=HF_HUB_OFFLINE=1
+  --setenv=PATH="$PATH" $PWD/run.sh`; stop `systemctl --user stop age-line-search`,
+  logs `journalctl --user -u age-line-search`. Transient = gone after a reboot.
+- Streamlit re-runs `app.py` on edit but may keep the OLD imported `age_search` module:
+  a traceback pointing at a harmless line (e.g. the signature) = stale module → restart.
