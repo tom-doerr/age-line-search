@@ -45,31 +45,57 @@ def number_to_words(n: int) -> str:
     return f"{_ONES[hundreds]} hundred" + (f" {number_to_words(rest)}" if rest else "")
 
 
-def build_prompt(template: str, age: int, as_words: bool = False) -> str:
+def format_age(age: float, as_words: bool = False) -> str:
+    """34.0 -> "34", 34.5 -> "34.5"; as words: "thirty-four point five"."""
+    text = f"{round(age, 6):g}"
+    if not as_words:
+        return text
+    whole, _, fraction = text.partition(".")
+    words = number_to_words(int(whole))
+    if fraction:
+        words += " point " + " ".join(_ONES[int(d)] for d in fraction)
+    return words
+
+
+def build_prompt(template: str, age: float, as_words: bool = False) -> str:
     if "{age}" not in template:
         raise ValueError("template must contain the placeholder {age}")
-    return template.replace("{age}", number_to_words(age) if as_words else str(age))
+    return template.replace("{age}", format_age(age, as_words))
+
+
+def age_grid(min_age: float, max_age: float, step: float) -> List[float]:
+    """min, min+step, ... plus max itself if the steps do not land on it."""
+    if min_age > max_age:
+        raise ValueError(f"min age {min_age} is larger than max age {max_age}")
+    if step <= 0:
+        raise ValueError(f"step must be > 0, got {step}")
+    count = int((max_age - min_age) / step + 1e-9) + 1
+    grid = [round(min_age + i * step, 6) for i in range(count)]
+    if grid[-1] != round(max_age, 6):
+        grid.append(round(max_age, 6))
+    return grid
 
 
 @dataclass
 class SearchResult:
-    ages: List[int]            # every age that was evaluated, ascending
+    ages: List[float]          # every age that was evaluated, ascending
     prompts: List[str]
     scores: List[float]        # cosine similarity per evaluated age
-    best_age: int
+    best_age: float
     expected_age: float        # softmax(scale * score)-weighted mean age
     evaluations: int
 
 
-def _finish(cache: Dict[int, float], prompts: Dict[int, str], logit_scale: float) -> SearchResult:
-    ages = sorted(cache)
-    scores = np.array([cache[a] for a in ages])
+def _finish(grid: List[float], cache: Dict[int, float], prompts: Dict[int, str], logit_scale: float) -> SearchResult:
+    indices = sorted(cache)
+    ages = [grid[i] for i in indices]
+    scores = np.array([cache[i] for i in indices])
     logits = logit_scale * scores
     probs = np.exp(logits - logits.max())
     probs /= probs.sum()
     return SearchResult(
         ages=ages,
-        prompts=[prompts[a] for a in ages],
+        prompts=[prompts[i] for i in indices],
         scores=scores.tolist(),
         best_age=ages[int(scores.argmax())],
         expected_age=float((probs * np.array(ages)).sum()),
@@ -80,45 +106,40 @@ def _finish(cache: Dict[int, float], prompts: Dict[int, str], logit_scale: float
 def line_search(
     score_fn: Callable[[Sequence[str]], Sequence[float]],
     template: str,
-    min_age: int,
-    max_age: int,
+    min_age: float,
+    max_age: float,
     method: str = "scan",
-    step: int = 1,
+    step: float = 1,
     as_words: bool = False,
     logit_scale: float = 100.0,
 ) -> SearchResult:
     """score_fn maps a list of prompts to image-text similarities.
 
-    method "scan": evaluate every `step` years between min and max (exhaustive).
-    method "golden": golden-section search on the integer age axis; needs far
+    Both methods work on the grid min, min+step, ..., max (step may be < 1).
+    method "scan": evaluate every grid point (exhaustive).
+    method "golden": golden-section search over the grid indices; needs far
     fewer evaluations but assumes the similarity curve has a single peak.
     """
-    if min_age > max_age:
-        raise ValueError(f"min age {min_age} is larger than max age {max_age}")
-    if step < 1:
-        raise ValueError(f"step must be >= 1, got {step}")
+    grid = age_grid(min_age, max_age, step)
     cache: Dict[int, float] = {}
     prompts: Dict[int, str] = {}
 
-    def evaluate(ages: Sequence[int]) -> None:
-        new = [a for a in dict.fromkeys(ages) if a not in cache]
+    def evaluate(indices: Sequence[int]) -> None:
+        new = [i for i in dict.fromkeys(indices) if i not in cache]
         if not new:
             return
-        for a in new:
-            prompts[a] = build_prompt(template, a, as_words)
-        values = score_fn([prompts[a] for a in new])
+        for i in new:
+            prompts[i] = build_prompt(template, grid[i], as_words)
+        values = score_fn([prompts[i] for i in new])
         if len(values) != len(new):
             raise RuntimeError(f"score_fn returned {len(values)} scores for {len(new)} prompts")
-        cache.update({a: float(v) for a, v in zip(new, values)})
+        cache.update({i: float(v) for i, v in zip(new, values)})
 
     if method == "scan":
-        ages = list(range(min_age, max_age + 1, step))
-        if ages[-1] != max_age:
-            ages.append(max_age)
-        evaluate(ages)
+        evaluate(range(len(grid)))
     elif method == "golden":
         inv_phi = (5 ** 0.5 - 1) / 2
-        lo, hi = min_age, max_age
+        lo, hi = 0, len(grid) - 1
         while hi - lo > 2:
             c = round(hi - inv_phi * (hi - lo))
             d = round(lo + inv_phi * (hi - lo))
@@ -132,7 +153,7 @@ def line_search(
         evaluate(range(lo, hi + 1))
     else:
         raise ValueError(f"unknown method {method!r}")
-    return _finish(cache, prompts, logit_scale)
+    return _finish(grid, cache, prompts, logit_scale)
 
 
 class ClipScorer:
@@ -201,6 +222,9 @@ def make_score_fn(scorer, image) -> Callable[[Sequence[str]], List[float]]:
     image_emb = scorer.embed_image(image)
 
     def score(texts: Sequence[str]) -> List[float]:
-        return (scorer.embed_texts(texts) @ image_emb).tolist()
+        scores: List[float] = []
+        for start in range(0, len(texts), 256):  # bound memory for fine steps
+            scores += (scorer.embed_texts(texts[start:start + 256]) @ image_emb).tolist()
+        return scores
 
     return score

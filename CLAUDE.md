@@ -5,7 +5,7 @@ line search over age prompts with CLIP or TIPSv2.
 
 - `age_search.py` = all logic (formats, number words, `line_search`, `ClipScorer`,
   `TipsScorer`); no streamlit import, torch imported lazily inside the scorers so
-  the tests need no GPU. `app.py` = UI only. `tests/` = 12 tests with a fake score_fn.
+  the tests need no GPU. `app.py` = UI only. `tests/` = 16 tests with a fake score_fn.
 - Run: `./run.sh` (port 8540, system python3 — it carries the GB10 cu130 torch;
   do not create a sealed venv). Tests: `python3 -m pytest -q`.
 - Models used from the HF cache: `openai/clip-vit-large-patch14` (+ -336, base-patch32),
@@ -23,3 +23,8 @@ line search over age prompts with CLIP or TIPSv2.
   Device is an explicit select (cuda/cpu) — no silent CPU fallback if CUDA fails.
 - Headless UI test trick: `AppTest.from_string` with `st.file_uploader` patched to
   return an open image file, `PYTHONPATH=.`.
+- Ages are FLOATS on a grid built by index (`age_grid`: min + i*step, rounded to 6
+  places, max appended if the steps miss it); step is a float input (min 0.01), so
+  prompts can read "34.5" / "thirty-four point five" (`format_age`, `%g` drops ".0").
+  Both scan and golden-section search the grid INDICES, so golden works at any step.
+  Full scan refuses > 2000 prompts (UI error); text encoding is chunked by 256.

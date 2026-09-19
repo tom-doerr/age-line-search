@@ -12,7 +12,7 @@ The image is embedded once; every candidate age becomes a prompt such as
 - **Model**: CLIP (`openai/clip-vit-*`) or TIPS (`google/tipsv2-*`), device cuda/cpu
 - **Age text format**: preset templates, a custom `{age}` template, digits or spelled-out words
 - **Min / max age** in years
-- **Search**: full scan (every `step` years) or golden-section (few evaluations, assumes one peak)
+- **Search**: full scan (every `step` years; the step may be fractional, e.g. 0.5) or golden-section (few evaluations, assumes one peak)
 
 Output: best age, softmax-weighted age (using the model's own logit scale),
 the similarity curve and the ranked prompt table.

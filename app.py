@@ -28,8 +28,8 @@ with st.sidebar:
     as_words = st.checkbox("Spell the number as words (e.g. thirty-four)")
 
     left, right = st.columns(2)
-    min_age = int(left.number_input("Min age (years)", min_value=0, max_value=150, value=1, step=1))
-    max_age = int(right.number_input("Max age (years)", min_value=0, max_value=150, value=90, step=1))
+    min_age = left.number_input("Min age (years)", min_value=0.0, max_value=150.0, value=1.0, step=1.0, format="%g")
+    max_age = right.number_input("Max age (years)", min_value=0.0, max_value=150.0, value=90.0, step=1.0, format="%g")
 
     method = st.radio(
         "Search", ["scan", "golden"],
@@ -37,7 +37,14 @@ with st.sidebar:
         help="Full scan evaluates every step. Golden-section needs few evaluations "
              "but assumes the similarity curve has a single peak.",
     )
-    step = int(st.number_input("Scan step (years)", min_value=1, max_value=50, value=1, disabled=method != "scan"))
+    step = st.number_input(
+        "Step (years)", min_value=0.01, max_value=50.0, value=1.0, step=0.1, format="%g",
+        help="Resolution of the age grid for both search methods. Values below 1 give fractional ages, e.g. 34.5.",
+    )
+    points = int((max_age - min_age) / step) + 1 if max_age >= min_age else 0
+    if method == "scan" and points > 2000:
+        st.error(f"{points} prompts for a full scan — raise the step or use golden-section.")
+        st.stop()
 
 upload = st.file_uploader("Image", type=["png", "jpg", "jpeg", "webp", "bmp"])
 
@@ -66,7 +73,7 @@ with st.spinner("Searching…"):
 
 with result_col:
     a, b, c = st.columns(3)
-    a.metric("Best age", f"{result.best_age} years")
+    a.metric("Best age", f"{result.best_age:g} years")
     b.metric("Softmax-weighted age", f"{result.expected_age:.1f} years")
     c.metric("Prompts evaluated", result.evaluations)
     table = pd.DataFrame({"age": result.ages, "similarity": result.scores, "prompt": result.prompts})
